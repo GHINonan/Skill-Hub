@@ -161,13 +161,126 @@
                   </v-col>
                 </v-row>
 
-                
+                <!-- View Skills -->
+                <div class="lg:mt-6 mb-2">
+                  <v-btn block color="white" dark @click="openUserModal">
+                    View Skills and Description
+                  </v-btn>
+                </div>
+                <!-- Remove Skills -->
+                <div class="lg:mt-6 mb-2">
+                  <v-btn block color="error" dark @click="openRemoveSkillModal">
+                    Remove Skill
+                  </v-btn>
+                </div>
+                <!-- Edit User Profile -->
+                <div class="lg:mt-6 mb-2">
+                  <v-btn block color="primary" dark @click="openEditModal">
+                    Edit User Profile
+                  </v-btn>
+                </div>
                 <!-- Logout -->
                 <div class="lg:mt-4">
                   <v-btn block color="error" dark @click="logout"> Logout </v-btn>
                 </div>
               </div>
             </div>
+
+
+            <!-- Edit Profile Modal -->
+            <v-dialog v-model="isEditModalOpen" max-width="600">
+              <v-card>
+                <v-card-title>Edit Profile</v-card-title>
+                <v-card-text>
+                  <v-form ref="editForm" v-model="isFormValid">
+                    <!-- First Name -->
+                    <v-text-field
+                      v-model="editData.firstname"
+                      label="First Name"
+                      :rules="[rules.required]"
+                      required
+                    ></v-text-field>
+
+                    <!-- Last Name -->
+                    <v-text-field
+                      v-model="editData.lastname"
+                      label="Last Name"
+                      :rules="[rules.required]"
+                      required
+                    ></v-text-field>
+
+                    <!-- Phone Number -->
+                    <v-text-field
+                      v-model="editData.phone"
+                      label="Phone Number"
+                      :rules="[rules.required]"
+                      required
+                    ></v-text-field>
+
+                    <!-- Facebook Account -->
+                    <v-text-field
+                      v-model="editData.facebook_acc"
+                      label="Facebook Account"
+                    ></v-text-field>
+
+                    <!-- User Description -->
+                    <v-textarea
+                      v-model="editData.user_description"
+                      label="Description"
+                      auto-grow
+                      rows="3"
+                      required
+                    ></v-textarea>
+
+                    <!-- Rate -->
+                    <v-text-field
+                      v-model="editData.rate"
+                      label="Rate"
+                      type="number"
+                      min="0"
+                      :rules="[rules.required, rules.numeric]"
+                      required
+                    ></v-text-field>
+
+                    <!-- Skills Section -->
+                    <div class="skills-section">
+                      <!-- Skill Input -->
+                      <v-text-field
+                        v-model="skillInput"
+                        label="Enter Skill Name"
+                        @keyup.enter="addSkillToList"
+                      ></v-text-field>
+                      <v-btn block color="primary" @click="addSkillToList" class="mb-2"
+                        >Add Skill</v-btn
+                      >
+
+                      <!-- Display Skill List -->
+                      <div v-if="skillsList.length" class="mt-4">
+                        <v-chip
+                          v-for="(skill, index) in skillsList"
+                          :key="index"
+                          close
+                          @click:close="removeSkill(index)"
+                          class="mb-1"
+                        >
+                          {{ skill }}
+                        </v-chip>
+                      </div>
+
+                      <!-- Submit Skills -->
+                      <v-btn color="success" @click="submitSkills" block>
+                        Submit Skills
+                      </v-btn>
+                    </div>
+                  </v-form>
+                </v-card-text>
+                <v-card-actions>
+                  <v-spacer></v-spacer>
+                  <v-btn text @click="isEditModalOpen = false">Cancel</v-btn>
+                  <v-btn color="primary" text @click="saveProfile">Save</v-btn>
+                </v-card-actions>
+              </v-card>
+            </v-dialog>
           </v-col>
 
           <!-- Right: Skills Section -->
@@ -191,6 +304,18 @@ import { supabase } from "@/supabase";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
+const rate = ref(0); // Initialize rate as a reactive variable
+const skillsList = ref([]); // Temporary skills array
+const skillInput = ref(""); // Skill input
+const skillDescription = ref(""); // Skill description
+const userSkills = ref([]); // Store user's skills
+const userDescription = ref(""); // Store user's description
+const isUserModalOpen = ref(false); // Control modal visibility
+const isRemoveModalOpen = ref(false); // Control modal visibility
+const otherUsers = ref([]); // Users excluding logged-in user
+const isDetailsModalOpen = ref(false); // Modal visibility control
+const selectedUser = ref({}); // Selected user details
+
 // Reactive State
 const drawer = ref(false);
 const isEditModalOpen = ref(false);
@@ -198,6 +323,14 @@ const isModalOpen = ref(false);
 const isFormValid = ref(false);
 const isWelcomeModalVisible = ref(false);
 
+const editData = ref({
+  firstname: "",
+  lastname: "",
+  phone: "",
+  facebook_acc: "",
+  user_description: "",
+  rate: "",
+});
 
 const user = ref({
   fullname: "",
@@ -220,11 +353,83 @@ const rules = {
   required: (value) => !!value || "This field is required.",
 };
 
+
 // Lifecycle Hook: Mounted
 onMounted(() => {
   fetchUserDetails();
   isWelcomeModalVisible.value = true;
 });
+
+const submitSkills = async () => {
+  if (!skillsList.value.length) {
+    alert("Please add at least one skill.");
+    return;
+  }
+
+  try {
+    // Step 1: Get the authenticated user's info ID
+    const {
+      data: { user: authUser },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !authUser) throw new Error("User not authenticated.");
+
+    const { data: userInfo, error: userInfoError } = await supabase
+      .from("users_info")
+      .select("id")
+      .eq("auth_users_id", authUser.id)
+      .single();
+
+    if (userInfoError || !userInfo) throw new Error("Failed to fetch user info.");
+
+    const userInfoId = userInfo.id;
+
+    // Step 2: Upsert skills into the `skills` table
+    let skillsIdMap = {}; // To store { skill_name: skill_id }
+    for (const skill of skillsList.value) {
+      const { data: existingSkill, error: fetchSkillError } = await supabase
+        .from("skills")
+        .select("id")
+        .eq("skill_name", skill)
+        .single();
+
+      if (fetchSkillError && fetchSkillError.code !== "PGRST116") throw fetchSkillError;
+
+      if (existingSkill) {
+        skillsIdMap[skill] = existingSkill.id; // Existing skill
+      } else {
+        // Insert new skill
+        const { data: newSkill, error: insertSkillError } = await supabase
+          .from("skills")
+          .insert({ skill_name: skill })
+          .select("id")
+          .single();
+
+        if (insertSkillError) throw insertSkillError;
+        skillsIdMap[skill] = newSkill.id; // New skill
+      }
+    }
+
+    // Step 3: Insert into `user_skill` table
+    const userSkillsData = Object.values(skillsIdMap).map((skillId) => ({
+      users_info_id: userInfoId,
+      skills_id: skillId,
+    }));
+
+    const { error: userSkillsError } = await supabase
+      .from("user_skill")
+      .insert(userSkillsData);
+
+    if (userSkillsError) throw userSkillsError;
+
+    alert("Skills added successfully!");
+    skillsList.value = []; // Clear input after submission
+  } catch (error) {
+    console.error("Error adding skills:", error.message);
+    alert("Failed to add skills.");
+  }
+};
 
 // Methods
 const fetchUserDetails = async () => {
@@ -260,6 +465,65 @@ const fetchUserDetails = async () => {
     console.error("Error fetching user details:", err.message);
   }
 };
+// Open Edit Modal
+const openEditModal = () => {
+  editData.value.firstname = user.value.first_name;
+  editData.value.lastname = user.value.last_name;
+  editData.value.phone = user.value.phone_number;
+  editData.value.facebook_acc = user.value.facebook_acc;
+  editData.value.user_description = user.value.user_description;
+  editData.value.rate = user.value.rate;
+  isEditModalOpen.value = true;
+};
+
+// Save Profile
+const saveProfile = async () => {
+  if (isFormValid.value) {
+    try {
+      await updateUserInfo(editData.value);
+
+      user.value.fullname = `${editData.value.firstname} ${editData.value.lastname}`;
+      user.value.first_name = editData.value.firstname;
+      user.value.last_name = editData.value.lastname;
+      user.value.phone = editData.value.phone;
+      user.value.facebook_acc = editData.value.facebook_acc;
+      user.value.user_description = editData.value.user_description;
+      user.value.rate = editData.value.rate;
+
+      isEditModalOpen.value = false;
+      alert("Profile updated successfully!");
+    } catch (error) {
+      console.error("Failed to update profile:", error.message);
+    }
+  } else {
+    alert("Please ensure the form is valid before submitting.");
+  }
+};
+
+// Update User Information
+const updateUserInfo = async (data) => {
+  const {
+    data: { user: authUser },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !authUser) throw new Error("User not authenticated.");
+
+  const { error } = await supabase
+    .from("users_info")
+    .update({
+      first_name: data.firstname,
+      last_name: data.lastname,
+      phone_number: data.phone,
+      facebook_acc: data.facebook_acc,
+      user_description: data.user_description,
+      rate: data.rate,
+    })
+    .eq("auth_users_id", authUser.id);
+
+  if (error) throw error;
+};
+
 const logout = async () => {
   try {
     const { error } = await supabase.auth.signOut();
