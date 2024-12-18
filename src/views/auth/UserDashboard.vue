@@ -186,6 +186,53 @@
               </div>
             </div>
 
+            <!-- User Skills and Description Modal -->
+            <v-dialog v-model="isUserModalOpen" max-width="600">
+              <v-card>
+                <v-card-title>User Skills and Description</v-card-title>
+                <v-card-text>
+                  <!-- User Description -->
+                  <div class="mb-4">
+                    <strong>Description:</strong>
+                    <p>{{ userDescription || "No description available" }}</p>
+                  </div>
+                  <div class="mb-4 d-flex">
+                    <strong>Rate: &nbsp;</strong>
+                    <p>{{ rate || "No rate available" }}</p>
+                  </div>
+
+                  <!-- Skills List -->
+                  <div v-if="userSkills.length" class="chip-container">
+                    <v-list>
+                      <v-list-item>
+                        <v-list-item-content>
+                          <!-- Render Chips -->
+                          <div class="d-flex flex-wrap">
+                            <v-chip
+                              v-for="(skill, index) in userSkills"
+                              :key="index"
+                              close
+                              @click:close="removeSkill(index)"
+                              class="mb-1 mr-2"
+                            >
+                              {{ skill.skill_name }}
+                            </v-chip>
+                          </div>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list>
+                  </div>
+                  <div v-else>
+                    <p>No skills added yet.</p>
+                  </div>
+                </v-card-text>
+                <v-card-actions>
+                  <v-spacer></v-spacer>
+                  <v-btn text @click="isUserModalOpen = false">Close</v-btn>
+                </v-card-actions>
+              </v-card>
+            </v-dialog>
+
 
             <!-- Edit Profile Modal -->
             <v-dialog v-model="isEditModalOpen" max-width="600">
@@ -316,6 +363,67 @@ const otherUsers = ref([]); // Users excluding logged-in user
 const isDetailsModalOpen = ref(false); // Modal visibility control
 const selectedUser = ref({}); // Selected user details
 
+const openUserModal = async () => {
+  try {
+    // Step 1: Authenticate User
+    const { data: authUserData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authUserData.user) throw new Error("User not authenticated.");
+    console.log("Authenticated User ID:", authUserData.user.id);
+
+    // Step 2: Fetch User Information (rate, description) from 'users_info'
+    const { data: userInfoData, error: userInfoError } = await supabase
+      .from("users_info")
+      .select("id, user_description, rate")
+      .eq("auth_users_id", authUserData.user.id)
+      .single();
+    if (userInfoError || !userInfoData) throw new Error("Failed to fetch user info.");
+    console.log("User Info Query Result:", userInfoData);
+
+    userDescription.value = userInfoData.user_description;
+    rate.value = userInfoData.rate; // Set the rate
+
+    // Step 3: Fetch User Skills using 'user_skill' as the link table
+    const { data: userSkillsData, error: userSkillsError } = await supabase
+      .from("user_skill")
+      .select(
+        `
+          skills:skills_id (skill_name)
+        `
+      )
+      .eq("users_info_id", userInfoData.id);
+
+    if (userSkillsError) {
+      console.error("Error fetching user's skills:", userSkillsError.message);
+      throw new Error("Failed to fetch user's skills.");
+    }
+
+    console.log("Fetched User Skills:", userSkillsData);
+
+    // Step 4: Map fetched data to align with the template
+    userSkills.value = userSkillsData.map((entry) => ({
+      skill_name: entry.skills?.skill_name || "Unknown Skill",
+    }));
+
+    console.log("Mapped User Skills:", userSkills.value);
+
+    // Open the modal
+    isUserModalOpen.value = true;
+  } catch (error) {
+    console.error("Error fetching user's skills and description:", error.message);
+    alert(error.message);
+  }
+};
+
+const addSkillToList = () => {
+  if (skillInput.value.trim()) {
+    skillsList.value.push(skillInput.value.trim());
+    skillInput.value = ""; // Clear input
+  }
+};
+
+const removeSkill = (index) => {
+  skillsList.value.splice(index, 1);
+};
 // Reactive State
 const drawer = ref(false);
 const isEditModalOpen = ref(false);
@@ -352,7 +460,6 @@ const dialog = ref({
 const rules = {
   required: (value) => !!value || "This field is required.",
 };
-
 
 // Lifecycle Hook: Mounted
 onMounted(() => {
