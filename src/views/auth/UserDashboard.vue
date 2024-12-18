@@ -365,7 +365,74 @@
             >
             <hr />
 
-            
+            <div class="skills-container mt-5">
+              <!-- Cards for All Users Excluding Logged-in User -->
+              <v-row dense>
+                <v-col v-if="otherUsers.length === 0" cols="12">
+                  <p>No users found.</p>
+                </v-col>
+                <v-col v-for="user in otherUsers" :key="user.id" cols="12" md="6" lg="4">
+                  <v-card class="pa-4" outlined>
+                    <!-- User Name -->
+                    <v-card-text class="font-weight-bold">
+                      <h3>{{ user.name || "No Name" }}</h3>
+                    </v-card-text>
+
+                    <!-- Short Description -->
+                    <v-card-text>
+                      <p>{{ user.user_description || "No Description" }}</p>
+                    </v-card-text>
+                    <v-card-text>
+                      <a href="{{ user.email }}">{{ user.email || "No Email" }}</a>
+                    </v-card-text>
+                    <v-card-text>
+                      <a href="{{ user.facebook_acc }}">{{
+                        user.facebook_acc || "No Facebook Link"
+                      }}</a>
+                    </v-card-text>
+
+                    <!-- View Details Button -->
+                    <v-card-actions class="justify-center">
+                      <v-btn color="primary" @click="openDetailsModal(user)">
+                        View Details
+                      </v-btn>
+                    </v-card-actions>
+                  </v-card>
+                </v-col>
+              </v-row>
+
+              <!-- Modal for Viewing User Details -->
+              <v-dialog v-model="isDetailsModalOpen" max-width="600px">
+                <v-card>
+                  <v-card-title>
+                    <span class="headline">User Details</span>
+                  </v-card-title>
+                  <v-card-text>
+                    <p><strong>Rate:</strong> {{ selectedUser.rate || "N/A" }}</p>
+                    <p>
+                      <strong>Description:</strong>
+                      {{ selectedUser.user_description || "No Description" }}
+                    </p>
+                    <div>
+                      <strong>Skills:</strong>
+                      <v-chip
+                        v-for="(skill, index) in selectedUser.skills"
+                        :key="index"
+                        class="ma-1"
+                      >
+                        {{ skill.skill_name }}
+                      </v-chip>
+                    </div>
+                  </v-card-text>
+                  <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn color="grey darken-1" text @click="isDetailsModalOpen = false">
+                      Close
+                    </v-btn>
+                  </v-card-actions>
+                </v-card>
+              </v-dialog>
+            </div>
           </v-col>
         </v-row>
       </v-container>
@@ -599,6 +666,50 @@ const rules = {
   required: (value) => !!value || "This field is required.",
 };
 
+// Fetch Users Excluding Logged-in User
+const fetchOtherUsers = async () => {
+  try {
+    // Step 1: Fetch logged-in user
+    const { data: authUserData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authUserData?.user) {
+      console.error("Auth Error:", authError || "User not authenticated.");
+      throw new Error("User not authenticated.");
+    }
+
+    const loggedInUserId = authUserData.user.id;
+
+    // Step 2: Fetch users excluding the logged-in user
+    const { data: usersData, error: usersError } = await supabase
+      .from("users_info")
+      .select(
+        "id, auth_users_id, first_name, last_name, user_description, rate, email, facebook_acc"
+      )
+      .neq("auth_users_id", loggedInUserId);
+
+    if (usersError) {
+      console.error("Users Query Error:", usersError);
+      throw new Error("Failed to fetch users data.");
+    }
+
+    if (!usersData || usersData.length === 0) {
+      console.warn("No other users found.");
+      otherUsers.value = [];
+      return;
+    }
+
+    // Step 3: Update reactive variable
+    otherUsers.value = usersData.map((user) => ({
+      id: user.id,
+      name: `${user.first_name || ""} ${user.last_name || ""}`.trim() || "Unnamed User",
+      user_description: user.user_description || "No description",
+      rate: user.rate || "N/A",
+      email: user.email || "N/A",
+      facebook_acc: user.facebook_acc || "N/A", // Updated key
+    }));
+  } catch (error) {
+    console.error("Error fetching other users:", error.message);
+  }
+};
 
 // Open Details Modal and Fetch Skills
 const openDetailsModal = async (user) => {
@@ -631,6 +742,7 @@ const openDetailsModal = async (user) => {
 onMounted(() => {
   fetchUserDetails();
   isWelcomeModalVisible.value = true;
+  fetchOtherUsers();
 });
 
 const submitSkills = async () => {
