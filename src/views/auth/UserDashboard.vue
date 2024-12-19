@@ -458,50 +458,42 @@ const otherUsers = ref([]); // Users excluding logged-in user
 const isDetailsModalOpen = ref(false); // Modal visibility control
 const selectedUser = ref({}); // Selected user details
 
+// Open Remove Skill Modal
 const openRemoveSkillModal = async () => {
   try {
-    // Step 1: Authenticate User
+    // Authenticate User
     const { data: authUserData, error: authError } = await supabase.auth.getUser();
     if (authError || !authUserData.user) throw new Error("User not authenticated.");
+
     console.log("Authenticated User ID:", authUserData.user.id);
 
-    // Step 2: Fetch User Information (rate, description) from 'users_info'
+    // Fetch User Info
     const { data: userInfoData, error: userInfoError } = await supabase
       .from("users_info")
-      .select("id, user_description, rate")
+      .select("id")
       .eq("auth_users_id", authUserData.user.id)
       .single();
-
     if (userInfoError || !userInfoData) throw new Error("Failed to fetch user info.");
+
     console.log("User Info Query Result:", userInfoData);
 
-    // Step 3: Fetch User Skills using 'user_skill' as the link table
+    // Fetch User Skills
     const { data: userSkillsData, error: userSkillsError } = await supabase
       .from("user_skill")
-      .select(
-        `
-        id,
-        skills:skills_id (skill_name)
-      `
-      )
+      .select(`id, skills_id, skills(skill_name)`)
       .eq("users_info_id", userInfoData.id);
+    if (userSkillsError) throw new Error("Failed to fetch user's skills.");
 
-    if (userSkillsError) {
-      console.error("Error fetching user's skills:", userSkillsError.message);
-      throw new Error("Failed to fetch user's skills.");
-    }
-
-    console.log("Fetched User Skills:", userSkillsData);
-
-    // Step 4: Map fetched data to align with the template
+    // Map Skills to Template Format
     userSkills.value = userSkillsData.map((entry) => ({
-      id: entry.id, // ID of the 'user_skill' for removal
-      skill_name: entry.skills?.skill_name || "Unknown Skill",
+      id: entry.id, // ID of the user_skill entry
+      skills_id: entry.skills_id, // ID of the skill
+      skill_name: entry.skills.skill_name || "Unknown Skill",
     }));
 
     console.log("Mapped User Skills:", userSkills.value);
 
-    // Open the remove skill modal
+    // Open the modal
     isRemoveModalOpen.value = true;
   } catch (error) {
     console.error("Error opening remove skill modal:", error.message);
@@ -509,10 +501,10 @@ const openRemoveSkillModal = async () => {
   }
 };
 
-// Function to Confirm Skill Removal
+// Confirm Remove Skill
 const confirmRemoveSkill = async (skill) => {
   try {
-    // Step 1: Authenticate User
+    // Authenticate User
     const { data: authUserData, error: authError } = await supabase.auth.getUser();
     if (authError || !authUserData.user) throw new Error("User not authenticated.");
 
@@ -523,38 +515,26 @@ const confirmRemoveSkill = async (skill) => {
       skill.skill_name
     );
 
-    // Step 2: Fetch User Information to get users_info_id
+    // Fetch User Info
     const { data: userInfoData, error: userInfoError } = await supabase
       .from("users_info")
       .select("id")
       .eq("auth_users_id", authUserData.user.id)
       .single();
-
     if (userInfoError || !userInfoData) throw new Error("Failed to fetch user info.");
 
-    // Step 3: Delete from 'user_skill' table
+    // Delete from 'user_skill' table
     const { error: userSkillDeleteError } = await supabase
       .from("user_skill")
       .delete()
       .eq("users_info_id", userInfoData.id)
-      .eq("skills_id", skill.id);
-
+      .eq("skills_id", skill.skills_id);
     if (userSkillDeleteError) throw new Error("Failed to remove skill link.");
 
     console.log(`Removed skill link for: ${skill.skill_name}`);
 
-    // Step 4: Delete from 'skills' table
-    const { error: skillDeleteError } = await supabase
-      .from("skills")
-      .delete()
-      .eq("id", skill.id);
-
-    if (skillDeleteError) throw new Error("Failed to remove skill from skills table.");
-
-    console.log(`Skill '${skill.skill_name}' deleted successfully from skills table.`);
-
-    // Step 5: Update UI by removing the skill locally
-    userSkills.value = userSkills.value.filter((s) => s.id !== skill.id);
+    // Update UI
+    userSkills.value = userSkills.value.filter((s) => s.skills_id !== skill.skills_id);
 
     alert(`Skill '${skill.skill_name}' removed successfully.`);
   } catch (error) {
